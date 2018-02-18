@@ -1,12 +1,82 @@
+/*
+   Copyright (C) 2014, 2016, 2018 Eric Herman <eric@freesa.org>
+
+   This work is free software: you can redistribute it and/or modify it
+   under the terms of the GNU Lesser General Public License as
+   published by the Free Software Foundation, either version 3 of the
+   License, or (at your option) any later version.
+
+   This work is distributed in the hope that it will be useful, but
+   WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License and the GNU General Public License for
+   more details.
+
+   You should have received a copy of the GNU Lesser General Public
+   License (COPYING) and the GNU General Public License (COPYING.GPL3).
+   If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include <Arduino.h>
 #include <SPI.h>
+#include <limits.h>		/* UINT_MAX */
+#include <float.h>		/* DBL_MAX */
+#include <math.h>		/* sqrt */
 
 #define TTY_BAUD 9600
 #define CHIP_SELECT_PIN 10
 #define LED_PIN 8
+#define DELAY_MICROS_BETWEEN_SAMPLES (500U)
+
+#define ENABLE_DEBUG 0
 
 #define Eprint(val) Serial.print(val)
 #define Eprintln(val) Serial.println(val)
+
+typedef struct simple_stats_s {
+	unsigned int cnt;
+	double min;
+	double max;
+	double sum;
+	double sum_of_squares;
+} simple_stats;
+
+void simple_stats_init(simple_stats * stats)
+{
+	stats->cnt = 0;
+	stats->min = DBL_MAX;
+	stats->max = -DBL_MAX;
+	stats->sum = 0.0;
+	stats->sum_of_squares = 0.0;
+}
+
+void simple_stats_append_val(simple_stats * stats, double val)
+{
+	stats->cnt++;
+	if (stats->min > val) {
+		stats->min = val;
+	}
+	if (stats->max < val) {
+		stats->max = val;
+	}
+	stats->sum += val;
+	stats->sum_of_squares += (val * val);
+}
+
+double simple_stats_average(simple_stats * stats)
+{
+	return stats->sum / stats->cnt;
+}
+
+double simple_stats_variance(simple_stats * stats)
+{
+	return stats->sum_of_squares / stats->cnt;
+}
+
+double simple_stats_std_dev(simple_stats * stats)
+{
+	return sqrt(simple_stats_variance(stats));
+}
 
 #ifndef CHAR_BIT
 #define CHAR_BIT 8
@@ -178,30 +248,65 @@ void setup()
 	Eprintln("\nStart\n");
 }
 
-uint32_t count = 0;
+uint32_t loop_count = 0;
 void loop()
 {
+	unsigned int sample_count, error_count;
+	unsigned int then, now;
+	float ext_temp, int_temp;
+	simple_stats external_temp_stats;
+	simple_stats internal_temp_stats;
 	uint32_t raw;
 	struct max31855_s smax;
 
-	++count;
-	digitalWrite(LED_PIN, ((count % 2) == 0) ? LOW : HIGH);
+	simple_stats_init(&external_temp_stats);
+	simple_stats_init(&internal_temp_stats);
 
-	raw = spi_read_big_endian_uint32(CHIP_SELECT_PIN);
+	++loop_count;
+	digitalWrite(LED_PIN, ((loop_count % 2) == 0) ? LOW : HIGH);
 
-	max31855_from_u32(&smax, raw);
+	sample_count = 0;
+	error_count = 0;
+	then = millis() / 1000;
+	do {
+		raw = spi_read_big_endian_uint32(CHIP_SELECT_PIN);
 
-	if (smax.fault) {
-		debug_max31855(raw);
-		delay(2000);
-		return;
+		max31855_from_u32(&smax, raw);
+
+		if (ENABLE_DEBUG && smax.fault) {
+			debug_max31855(raw);
+			delay(2000);
+			return;
+		}
+		if (smax.fault) {
+			++error_count;
+		} else {
+			++sample_count;
+			ext_temp = max31855_degrees(&smax);
+			simple_stats_append_val(&external_temp_stats, ext_temp);
+			int_temp = max31855_internal(&smax);
+			simple_stats_append_val(&internal_temp_stats, int_temp);
+		}
+		delayMicroseconds(DELAY_MICROS_BETWEEN_SAMPLES);
+		now = millis() / 1000;
+	} while (now == then);
+
+	Serial.print(loop_count);
+	Serial.print(" temp: ");
+	Serial.print(simple_stats_average(&external_temp_stats));
+	Serial.print(" (min: ");
+	Serial.print(external_temp_stats.min);
+	Serial.print(" max: ");
+	Serial.print(external_temp_stats.max);
+	Serial.print(" cnt: ");
+	Serial.print(external_temp_stats.cnt);
+	if (error_count) {
+		Serial.print(" err: ");
+		Serial.print(error_count);
 	}
-
-	Serial.print(count);
-	Serial.print(", ");
-
-	Serial.print(max31855_degrees(&smax));
-	Serial.print(", ");
-	Serial.println(max31855_internal(&smax));
-	delay(450);
+	Serial.print(")");
+	Serial.print(" (ambient: ");
+	Serial.print(simple_stats_average(&internal_temp_stats));
+	Serial.print(")");
+	Serial.println();
 }
