@@ -1,4 +1,4 @@
-/*
+/* thermostuf2.ino : Arduino code for the MAX31855K Thermocouple
    Copyright (C) 2014, 2016, 2018 Eric Herman <eric@freesa.org>
 
    This work is free software: you can redistribute it and/or modify it
@@ -16,71 +16,20 @@
    License (COPYING) and the GNU General Public License (COPYING.GPL3).
    If not, see <http://www.gnu.org/licenses/>.
 */
+/* includes: https://github.com/ericherman/simple_stats */
 
 #include <Arduino.h>
 #include <SPI.h>
-#include <limits.h>		/* UINT_MAX */
-#include <float.h>		/* DBL_MAX */
-#include <math.h>		/* sqrt */
+#include <float.h>
+#include <math.h>
 
 #define TTY_BAUD 9600
 #define CHIP_SELECT_PIN 10
 #define LED_PIN 8
-#define DELAY_MICROS_BETWEEN_SAMPLES (500U)
 
-#define ENABLE_DEBUG 0
-
-#define Eprint(val) Serial.print(val)
-#define Eprintln(val) Serial.println(val)
-
-typedef struct simple_stats_s {
-	unsigned int cnt;
-	double min;
-	double max;
-	double sum;
-	double sum_of_squares;
-} simple_stats;
-
-void simple_stats_init(simple_stats * stats)
-{
-	stats->cnt = 0;
-	stats->min = DBL_MAX;
-	stats->max = -DBL_MAX;
-	stats->sum = 0.0;
-	stats->sum_of_squares = 0.0;
-}
-
-void simple_stats_append_val(simple_stats * stats, double val)
-{
-	stats->cnt++;
-	if (stats->min > val) {
-		stats->min = val;
-	}
-	if (stats->max < val) {
-		stats->max = val;
-	}
-	stats->sum += val;
-	stats->sum_of_squares += (val * val);
-}
-
-double simple_stats_average(simple_stats * stats)
-{
-	return stats->sum / stats->cnt;
-}
-
-double simple_stats_variance(simple_stats * stats)
-{
-	return stats->sum_of_squares / stats->cnt;
-}
-
-double simple_stats_std_dev(simple_stats * stats)
-{
-	return sqrt(simple_stats_variance(stats));
-}
-
-#ifndef CHAR_BIT
-#define CHAR_BIT 8
-#endif
+#define Microseconds_per_second (1000UL * 1000UL)
+const unsigned long microseconds_per_reading = 2 * Microseconds_per_second;
+const unsigned long microseconds_between_samples = 500;
 
 /*
  * See also: sparkfun's demo at
@@ -139,55 +88,13 @@ static float max31855_internal(struct max31855_s *smax)
 	return smax ? ((smax->internal_sixteenths * 1.0) / 16.0) : NAN;
 }
 
-void debug_max31855(uint32_t raw)
-{
-	struct max31855_s smax;
-
-	max31855_from_u32(&smax, raw);
-
-	Eprint("max31855_from_u32(");
-	Eprint(raw);
-	Eprintln(") {");
-
-	Eprint("\tquarter_degrees: ");
-	Eprint(smax.quarter_degrees);
-	Eprint(" (");
-	Eprint(((smax.quarter_degrees * 1.0) / 4.0));
-	Eprintln(")");
-
-	Eprint("\treserved (");
-	Eprint(smax.reserved17);
-	Eprintln(")");
-
-	Eprint("\tfault: ");
-	Eprint(smax.fault);
-	Eprintln();
-
-	Eprint("\tinternal_sixteenths: ");
-	Eprint(smax.internal_sixteenths);
-	Eprint(" (");
-	Eprint(((smax.internal_sixteenths * 1.0) / 16.0));
-	Eprintln(")");
-
-	Eprint("\treserved (");
-	Eprint(smax.reserved3);
-	Eprintln(")");
-
-	Eprint("\terr_scv: ");
-	Eprint(smax.err_scv);
-	Eprintln();
-
-	Eprint("\trr_scg: ");
-	Eprint(smax.err_scg);
-	Eprintln();
-
-	Eprint("\terr_oc: ");
-	Eprint(smax.err_oc);
-	Eprintln();
-
-	Eprintln("}");
-}
-
+/* POSIX and Windows define CHAR_BIT to be 8, but embedded platforms vary */
+#ifndef CHAR_BIT
+#define CHAR_BIT 8
+#endif
+#if (CHAR_BIT != 8)
+#error "CHAR_BUT != 8"
+#endif
 uint32_t spi_read_big_endian_uint32(uint8_t cs)
 {
 	uint8_t bytes[4];
@@ -214,6 +121,57 @@ uint32_t spi_read_big_endian_uint32(uint8_t cs)
 	return u32;
 }
 
+#define ErrorPrint(val) Serial.print(val)
+#define ErrorPrintln(val) Serial.println(val)
+void debug_max31855(uint32_t raw)
+{
+	struct max31855_s smax;
+
+	max31855_from_u32(&smax, raw);
+
+	ErrorPrint("max31855_from_u32(");
+	ErrorPrint(raw);
+	ErrorPrintln(") {");
+
+	ErrorPrint("\tquarter_degrees: ");
+	ErrorPrint(smax.quarter_degrees);
+	ErrorPrint(" (");
+	ErrorPrint(((smax.quarter_degrees * 1.0) / 4.0));
+	ErrorPrintln(")");
+
+	ErrorPrint("\treserved (");
+	ErrorPrint(smax.reserved17);
+	ErrorPrintln(")");
+
+	ErrorPrint("\tfault: ");
+	ErrorPrint(smax.fault);
+	ErrorPrintln();
+
+	ErrorPrint("\tinternal_sixteenths: ");
+	ErrorPrint(smax.internal_sixteenths);
+	ErrorPrint(" (");
+	ErrorPrint(((smax.internal_sixteenths * 1.0) / 16.0));
+	ErrorPrintln(")");
+
+	ErrorPrint("\treserved (");
+	ErrorPrint(smax.reserved3);
+	ErrorPrintln(")");
+
+	ErrorPrint("\terr_scv: ");
+	ErrorPrint(smax.err_scv);
+	ErrorPrintln();
+
+	ErrorPrint("\trr_scg: ");
+	ErrorPrint(smax.err_scg);
+	ErrorPrintln();
+
+	ErrorPrint("\terr_oc: ");
+	ErrorPrint(smax.err_oc);
+	ErrorPrintln();
+
+	ErrorPrintln("}");
+}
+
 /* if you need non-celsius, use these */
 /*
 static float celsius_to_fahrenheit(float celsius)
@@ -232,6 +190,80 @@ static float celsius_to_rankine(float celsius)
 }
 */
 
+typedef struct simple_stats_s {
+	unsigned int cnt;
+	double min;
+	double max;
+	double sum;
+	double sum_of_squares;
+} simple_stats;
+
+static void simple_stats_init(simple_stats *stats);
+static void simple_stats_append_val(simple_stats *stats, double val);
+static double simple_stats_average(simple_stats *stats);
+static double simple_stats_variance(simple_stats *stats, int bessel_correct);
+static double simple_stats_std_dev(simple_stats *stats, int bessel_correct);
+
+static void simple_stats_init(simple_stats *stats)
+{
+	stats->cnt = 0;
+	stats->min = DBL_MAX;
+	stats->max = -DBL_MAX;
+	stats->sum = 0.0;
+	stats->sum_of_squares = 0.0;
+}
+
+static void simple_stats_append_val(simple_stats *stats, double val)
+{
+	stats->cnt++;
+	if (stats->min > val) {
+		stats->min = val;
+	}
+	if (stats->max < val) {
+		stats->max = val;
+	}
+	stats->sum += val;
+	stats->sum_of_squares += (val * val);
+}
+
+static double simple_stats_average(simple_stats *stats)
+{
+	return stats->sum / stats->cnt;
+}
+
+static double simple_stats_variance(simple_stats *stats, int bessel_correct)
+{
+	double avg_sum_squared, avg_diff_sum_sq, variance;
+	size_t bassel_cnt;
+
+	/*   avoid division by zero */
+	if (stats->cnt == 0) {
+		return NAN;
+	}
+	if (stats->cnt == 1) {
+		return 0.0;
+	}
+
+	/* https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance */
+
+	/*  Because SumSq and (Sum * Sum)/n can be very similar
+	 *  numbers, cancellation can lead to the precision of the result to
+	 *  be much less than the inherent precision of the floating-point
+	 *  arithmetic used to perform the computation. Thus this algorithm
+	 *  should not be used in practice. */
+
+	bassel_cnt = bessel_correct ? (stats->cnt - 1) : stats->cnt;
+	avg_sum_squared = (stats->sum * stats->sum) / stats->cnt;
+	avg_diff_sum_sq = stats->sum_of_squares - avg_sum_squared;
+	variance = avg_diff_sum_sq / bassel_cnt;
+	return fabs(variance);
+}
+
+static double simple_stats_std_dev(simple_stats *stats, int bessel_correct)
+{
+	return sqrt(simple_stats_variance(stats, bessel_correct));
+}
+
 void setup()
 {
 	pinMode(LED_PIN, OUTPUT);
@@ -245,68 +277,79 @@ void setup()
 	delay(50);
 
 	Serial.begin(TTY_BAUD);
-	Eprintln("\nStart\n");
+	Serial.println("\nStart\n");
+	Serial.print("Seconds per Reading: ");
+	Serial.println((double)microseconds_per_reading /
+		     (double)Microseconds_per_second);
+	Serial.print("microseconds delay between samples: ");
+	Serial.println(microseconds_between_samples);
+	Serial.println("\n");
 }
 
 uint32_t loop_count = 0;
 void loop()
 {
-	unsigned int sample_count, error_count;
-	unsigned int then, now;
-	float ext_temp, int_temp;
-	simple_stats external_temp_stats;
-	simple_stats internal_temp_stats;
 	uint32_t raw;
 	struct max31855_s smax;
-
-	simple_stats_init(&external_temp_stats);
-	simple_stats_init(&internal_temp_stats);
+	simple_stats ss_temperature, ss_internal_temp;
+	int bessel_correct = 1;
+	int error, enough;
+	size_t i;
 
 	++loop_count;
 	digitalWrite(LED_PIN, ((loop_count % 2) == 0) ? LOW : HIGH);
 
-	sample_count = 0;
-	error_count = 0;
-	then = millis() / 1000;
-	do {
+	simple_stats_init(&ss_temperature);
+	simple_stats_init(&ss_internal_temp);
+
+	unsigned long start_micros = micros();
+	for (i = 0, enough = 0, error = 0; !error && !enough; ++i) {
 		raw = spi_read_big_endian_uint32(CHIP_SELECT_PIN);
-
 		max31855_from_u32(&smax, raw);
-
-		if (ENABLE_DEBUG && smax.fault) {
-			debug_max31855(raw);
-			delay(2000);
-			return;
-		}
 		if (smax.fault) {
-			++error_count;
+			error = 1;
 		} else {
-			++sample_count;
-			ext_temp = max31855_degrees(&smax);
-			simple_stats_append_val(&external_temp_stats, ext_temp);
-			int_temp = max31855_internal(&smax);
-			simple_stats_append_val(&internal_temp_stats, int_temp);
+			double d = max31855_degrees(&smax);
+			simple_stats_append_val(&ss_temperature, d);
+			d = max31855_internal(&smax);
+			simple_stats_append_val(&ss_internal_temp, d);
+			delayMicroseconds(microseconds_between_samples);
 		}
-		delayMicroseconds(DELAY_MICROS_BETWEEN_SAMPLES);
-		now = millis() / 1000;
-	} while (now == then);
+		unsigned long now_micros = micros();
+		if (now_micros < start_micros) {
+			enough = 1;
+		} else {
+			unsigned long elapsed_micros =
+			    now_micros - start_micros;
+			if (elapsed_micros >= microseconds_per_reading) {
+				enough = 1;
+			}
+		}
+	}
 
 	Serial.print(loop_count);
-	Serial.print(" temp: ");
-	Serial.print(simple_stats_average(&external_temp_stats));
+	Serial.print(", ");
+	Serial.print(simple_stats_average(&ss_temperature));
+	Serial.print(" +/-");
+	Serial.print(simple_stats_std_dev(&ss_temperature, bessel_correct));
 	Serial.print(" (min: ");
-	Serial.print(external_temp_stats.min);
-	Serial.print(" max: ");
-	Serial.print(external_temp_stats.max);
-	Serial.print(" cnt: ");
-	Serial.print(external_temp_stats.cnt);
-	if (error_count) {
-		Serial.print(" err: ");
-		Serial.print(error_count);
-	}
-	Serial.print(")");
-	Serial.print(" (ambient: ");
-	Serial.print(simple_stats_average(&internal_temp_stats));
-	Serial.print(")");
+	Serial.print(ss_temperature.min);
+	Serial.print(", max: ");
+	Serial.print(ss_temperature.max);
+	Serial.print(", cnt: ");
+	Serial.print(ss_temperature.cnt);
+	Serial.print("), internal: ");
+	Serial.print(simple_stats_average(&ss_internal_temp));
+	Serial.print(" +/-");
+	Serial.print(simple_stats_std_dev(&ss_internal_temp, bessel_correct));
 	Serial.println();
+
+	if (error) {
+		ErrorPrint("[");
+		ErrorPrint(i);
+		ErrorPrint("]");
+		debug_max31855(raw);
+		delay(1000);
+		ErrorPrintln();
+	}
 }
