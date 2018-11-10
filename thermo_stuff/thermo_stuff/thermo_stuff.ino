@@ -28,8 +28,12 @@
 #define LED_PIN 8
 
 #define Microseconds_per_second (1000UL * 1000UL)
-const unsigned long microseconds_per_reading = 2 * Microseconds_per_second;
+const unsigned long microseconds_per_reading = 1 * Microseconds_per_second;
 const unsigned long microseconds_between_samples = 500;
+
+/* globals */
+unsigned long target_micros = 0;
+uint32_t loop_count = 0;
 
 /*
  * See also: sparkfun's demo at
@@ -121,55 +125,64 @@ uint32_t spi_read_big_endian_uint32(uint8_t cs)
 	return u32;
 }
 
-#define ErrorPrint(val) Serial.print(val)
-#define ErrorPrintln(val) Serial.println(val)
+#define Debug_print_s(str) Serial.print(str)
+#define Debug_print_u(u) Serial.print(u)
+#define Debug_print_i(i) Serial.print(i)
+#define Debug_print_d(d) Serial.print(d)
+#define Debug_println Serial.println
 void debug_max31855(uint32_t raw)
 {
 	struct max31855_s smax;
 
 	max31855_from_u32(&smax, raw);
 
-	ErrorPrint("max31855_from_u32(");
-	ErrorPrint(raw);
-	ErrorPrintln(") {");
+	Debug_print_s("max31855_from_u32(");
+	Debug_print_u(raw);
+	Debug_print_s(") {");
+	Debug_println();
 
-	ErrorPrint("\tquarter_degrees: ");
-	ErrorPrint(smax.quarter_degrees);
-	ErrorPrint(" (");
-	ErrorPrint(((smax.quarter_degrees * 1.0) / 4.0));
-	ErrorPrintln(")");
+	Debug_print_s("\tquarter_degrees: ");
+	Debug_print_i(smax.quarter_degrees);
+	Debug_print_s(" (");
+	Debug_print_d(((smax.quarter_degrees * 1.0) / 4.0));
+	Debug_print_s(")");
+	Debug_println();
 
-	ErrorPrint("\treserved (");
-	ErrorPrint(smax.reserved17);
-	ErrorPrintln(")");
+	Debug_print_s("\treserved (");
+	Debug_print_u(smax.reserved17);
+	Debug_print_s(")");
+	Debug_println();
 
-	ErrorPrint("\tfault: ");
-	ErrorPrint(smax.fault);
-	ErrorPrintln();
+	Debug_print_s("\tfault: ");
+	Debug_print_u(smax.fault);
+	Debug_println();
 
-	ErrorPrint("\tinternal_sixteenths: ");
-	ErrorPrint(smax.internal_sixteenths);
-	ErrorPrint(" (");
-	ErrorPrint(((smax.internal_sixteenths * 1.0) / 16.0));
-	ErrorPrintln(")");
+	Debug_print_s("\tinternal_sixteenths: ");
+	Debug_print_i(smax.internal_sixteenths);
+	Debug_print_s(" (");
+	Debug_print_d(((smax.internal_sixteenths * 1.0) / 16.0));
+	Debug_print_s(")");
+	Debug_println();
 
-	ErrorPrint("\treserved (");
-	ErrorPrint(smax.reserved3);
-	ErrorPrintln(")");
+	Debug_print_s("\treserved (");
+	Debug_print_u(smax.reserved3);
+	Debug_print_s(")");
+	Debug_println();
 
-	ErrorPrint("\terr_scv: ");
-	ErrorPrint(smax.err_scv);
-	ErrorPrintln();
+	Debug_print_s("\terr_scv: ");
+	Debug_print_u(smax.err_scv);
+	Debug_println();
 
-	ErrorPrint("\trr_scg: ");
-	ErrorPrint(smax.err_scg);
-	ErrorPrintln();
+	Debug_print_s("\trr_scg: ");
+	Debug_print_u(smax.err_scg);
+	Debug_println();
 
-	ErrorPrint("\terr_oc: ");
-	ErrorPrint(smax.err_oc);
-	ErrorPrintln();
+	Debug_print_s("\terr_oc: ");
+	Debug_print_u(smax.err_oc);
+	Debug_println();
 
-	ErrorPrintln("}");
+	Debug_print_s("}");
+	Debug_println();
 }
 
 /* if you need non-celsius, use these */
@@ -280,20 +293,20 @@ void setup()
 	Serial.println("\nStart\n");
 	Serial.print("Seconds per Reading: ");
 	Serial.println((double)microseconds_per_reading /
-		     (double)Microseconds_per_second);
+		       (double)Microseconds_per_second);
 	Serial.print("microseconds delay between samples: ");
 	Serial.println(microseconds_between_samples);
 	Serial.println("\n");
+	target_micros = micros() + microseconds_per_reading;
 }
 
-uint32_t loop_count = 0;
 void loop()
 {
-	uint32_t raw;
+	uint32_t raw, saved_error_raw;
 	struct max31855_s smax;
 	simple_stats ss_temperature, ss_internal_temp;
 	int bessel_correct = 1;
-	int error, enough;
+	unsigned int errors;
 	size_t i;
 
 	++loop_count;
@@ -302,30 +315,22 @@ void loop()
 	simple_stats_init(&ss_temperature);
 	simple_stats_init(&ss_internal_temp);
 
-	unsigned long start_micros = micros();
-	for (i = 0, enough = 0, error = 0; !error && !enough; ++i) {
+	errors = 0;
+	for (i = 0; micros() < target_micros; ++i) {
 		raw = spi_read_big_endian_uint32(CHIP_SELECT_PIN);
 		max31855_from_u32(&smax, raw);
 		if (smax.fault) {
-			error = 1;
+			++errors;
+			saved_error_raw = raw;
 		} else {
 			double d = max31855_degrees(&smax);
 			simple_stats_append_val(&ss_temperature, d);
 			d = max31855_internal(&smax);
 			simple_stats_append_val(&ss_internal_temp, d);
-			delayMicroseconds(microseconds_between_samples);
 		}
-		unsigned long now_micros = micros();
-		if (now_micros < start_micros) {
-			enough = 1;
-		} else {
-			unsigned long elapsed_micros =
-			    now_micros - start_micros;
-			if (elapsed_micros >= microseconds_per_reading) {
-				enough = 1;
-			}
-		}
+		delayMicroseconds(microseconds_between_samples);
 	}
+	target_micros += microseconds_per_reading;
 
 	Serial.print(loop_count);
 	Serial.print(", ");
@@ -344,12 +349,12 @@ void loop()
 	Serial.print(simple_stats_std_dev(&ss_internal_temp, bessel_correct));
 	Serial.println();
 
-	if (error) {
-		ErrorPrint("[");
-		ErrorPrint(i);
-		ErrorPrint("]");
-		debug_max31855(raw);
-		delay(1000);
-		ErrorPrintln();
+	if (errors) {
+		Serial.print("Errors: ");
+		Serial.print(errors);
+		Serial.print(" ");
+		debug_max31855(saved_error_raw);
+		Serial.println();
+		delayMicroseconds(microseconds_per_reading / 8);
 	}
 }
