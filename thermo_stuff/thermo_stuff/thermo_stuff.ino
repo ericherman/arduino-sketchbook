@@ -26,6 +26,7 @@
 #define TTY_BAUD 9600
 #define CHIP_SELECT_PIN 10
 #define LED_PIN 8
+#define ERROR_PIN 13
 
 #define Microseconds_per_second (1000UL * 1000UL)
 const unsigned long microseconds_per_reading = 1 * Microseconds_per_second;
@@ -171,14 +172,23 @@ void debug_max31855(uint32_t raw)
 
 	Debug_print_s("\terr_scv: ");
 	Debug_print_u(smax.err_scv);
+	if (smax.err_scv) {
+		Debug_print_s(" Shorted to Vcc!");
+	}
 	Debug_println();
 
 	Debug_print_s("\trr_scg: ");
 	Debug_print_u(smax.err_scg);
+	if (smax.err_scg) {
+		Debug_print_s(" Shorted to GND!");
+	}
 	Debug_println();
 
 	Debug_print_s("\terr_oc: ");
 	Debug_print_u(smax.err_oc);
+	if (smax.err_oc) {
+		Debug_print_s(" Open Circuit!");
+	}
 	Debug_println();
 
 	Debug_print_s("}");
@@ -280,6 +290,7 @@ static double simple_stats_std_dev(simple_stats *stats, int bessel_correct)
 void setup()
 {
 	pinMode(LED_PIN, OUTPUT);
+	pinMode(ERROR_PIN, OUTPUT);
 
 	pinMode(CHIP_SELECT_PIN, OUTPUT);
 	digitalWrite(CHIP_SELECT_PIN, HIGH);
@@ -311,6 +322,7 @@ void loop()
 
 	++loop_count;
 	digitalWrite(LED_PIN, ((loop_count % 2) == 0) ? LOW : HIGH);
+	digitalWrite(ERROR_PIN, LOW);
 
 	simple_stats_init(&ss_temperature);
 	simple_stats_init(&ss_internal_temp);
@@ -328,26 +340,31 @@ void loop()
 			d = max31855_internal(&smax);
 			simple_stats_append_val(&ss_internal_temp, d);
 		}
+		digitalWrite(ERROR_PIN, smax.fault ? HIGH : LOW);
 		delayMicroseconds(microseconds_between_samples);
 	}
 	target_micros += microseconds_per_reading;
 
 	Serial.print(loop_count);
 	Serial.print(", ");
-	Serial.print(simple_stats_average(&ss_temperature));
-	Serial.print(" +/-");
-	Serial.print(simple_stats_std_dev(&ss_temperature, bessel_correct));
-	Serial.print(" (min: ");
-	Serial.print(ss_temperature.min);
-	Serial.print(", max: ");
-	Serial.print(ss_temperature.max);
-	Serial.print(", cnt: ");
-	Serial.print(ss_temperature.cnt);
-	Serial.print("), internal: ");
-	Serial.print(simple_stats_average(&ss_internal_temp));
-	Serial.print(" +/-");
-	Serial.print(simple_stats_std_dev(&ss_internal_temp, bessel_correct));
-	Serial.println();
+	if (ss_temperature.cnt) {
+		Serial.print(simple_stats_average(&ss_temperature));
+		Serial.print(" +/-");
+		Serial.print(simple_stats_std_dev
+			     (&ss_temperature, bessel_correct));
+		Serial.print(" (min: ");
+		Serial.print(ss_temperature.min);
+		Serial.print(", max: ");
+		Serial.print(ss_temperature.max);
+		Serial.print(", cnt: ");
+		Serial.print(ss_temperature.cnt);
+		Serial.print("), internal: ");
+		Serial.print(simple_stats_average(&ss_internal_temp));
+		Serial.print(" +/-");
+		Serial.print(simple_stats_std_dev
+			     (&ss_internal_temp, bessel_correct));
+		Serial.println();
+	}
 
 	if (errors) {
 		Serial.print("Errors: ");
@@ -355,6 +372,14 @@ void loop()
 		Serial.print(" ");
 		debug_max31855(saved_error_raw);
 		Serial.println();
-		delayMicroseconds(microseconds_per_reading / 8);
+
+		digitalWrite(ERROR_PIN, HIGH);
+		if (ss_temperature.cnt > errors) {
+			/* got some values, but some errors, add small delay */
+			delayMicroseconds(microseconds_per_reading / 4);
+		} else {
+			/* things are broken add large delay */
+			delayMicroseconds(microseconds_per_reading * 4);
+		}
 	}
 }
