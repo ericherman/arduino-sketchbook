@@ -23,17 +23,50 @@
 #include <float.h>
 #include <math.h>
 
+/*
+#define TARGET_1 70.0
+#define TARGET_1 64.7
+*/
+#define TARGET_1 20.0
+
+/*
+#define TARGET_2 80.0
+#define TARGET_2 78.37
+*/
+#define TARGET_2 25.0
+
+#define SECONDS_PER_READING 1
+#define MINIMUM_SECONDS_BETWEEN_CHANGE 5
+#define OVER_TARGET_THRESHOLD 10
+#define PRINT_INTERNAL_TEMP 0
+
 #define TTY_BAUD 9600
-#define CHIP_SELECT_PIN 10
-#define LED_PIN 8
-#define ERROR_PIN 13
+
+/* INTERNAL PINS */
+#define THERMO_COUPLE_CHIP_SELECT_PIN 2
+
+/* INPUT PINS */
+#define ENABLE_BELOW_TARGET_READ_PIN 3
+#define USE_WARMER_TARGET_READ_PIN 4
+
+/* OUTPUT PINS */
+#define BELOW_TARGET_PIN 5
+#define LOOP_STATUS_PIN 6
+#define BELOW_TARGET_STATUS_PIN 7
+#define OVER_TARGET_STATUS_PIN 8
+#define ERROR_STATUS_PIN 9
 
 #define Microseconds_per_second (1000UL * 1000UL)
-const unsigned long microseconds_per_reading = 1 * Microseconds_per_second;
+const unsigned long microseconds_per_reading =
+    (SECONDS_PER_READING * Microseconds_per_second);
 const unsigned long microseconds_between_samples = 500;
+const unsigned long microseconds_between_changes =
+    (MINIMUM_SECONDS_BETWEEN_CHANGE * Microseconds_per_second);
 
 /* globals */
 unsigned long target_micros = 0;
+unsigned long target_change_micros = 0;
+unsigned int below_output_enabled = 0;
 uint32_t loop_count = 0;
 
 /*
@@ -289,15 +322,27 @@ static double simple_stats_std_dev(simple_stats *stats, int bessel_correct)
 
 void setup()
 {
-	pinMode(LED_PIN, OUTPUT);
-	pinMode(ERROR_PIN, OUTPUT);
+	pinMode(THERMO_COUPLE_CHIP_SELECT_PIN, OUTPUT);
 
-	pinMode(CHIP_SELECT_PIN, OUTPUT);
-	digitalWrite(CHIP_SELECT_PIN, HIGH);
+	pinMode(BELOW_TARGET_PIN, OUTPUT);
+	pinMode(LOOP_STATUS_PIN, OUTPUT);
+	pinMode(BELOW_TARGET_STATUS_PIN, OUTPUT);
+	pinMode(OVER_TARGET_STATUS_PIN, OUTPUT);
+	pinMode(ERROR_STATUS_PIN, OUTPUT);
+
+	pinMode(ENABLE_BELOW_TARGET_READ_PIN, INPUT);
+	pinMode(USE_WARMER_TARGET_READ_PIN, INPUT);
+
+	digitalWrite(THERMO_COUPLE_CHIP_SELECT_PIN, HIGH);
+	digitalWrite(BELOW_TARGET_PIN, LOW);
+	digitalWrite(LOOP_STATUS_PIN, LOW);
+	digitalWrite(BELOW_TARGET_STATUS_PIN, LOW);
+	digitalWrite(OVER_TARGET_STATUS_PIN, LOW);
+	digitalWrite(ERROR_STATUS_PIN, LOW);
 
 	SPI.begin();
 
-	/* Let IC stabilize or first readings will be garbage */
+	/* Let IC stabilize to avoid first reading as garbage */
 	delay(50);
 
 	Serial.begin(TTY_BAUD);
@@ -309,6 +354,7 @@ void setup()
 	Serial.println(microseconds_between_samples);
 	Serial.println("\n");
 	target_micros = micros() + microseconds_per_reading;
+	target_change_micros = target_micros + microseconds_between_changes;
 }
 
 void loop()
@@ -317,19 +363,26 @@ void loop()
 	struct max31855_s smax;
 	simple_stats ss_temperature, ss_internal_temp;
 	int bessel_correct = 1;
-	unsigned int errors;
+	unsigned int enabled, below, way_over, errors;
+	double target, avg_temp;
 	size_t i;
 
+	digitalWrite(ERROR_STATUS_PIN, LOW);
+	enabled = digitalRead(ENABLE_BELOW_TARGET_READ_PIN);
+	if (!enabled) {
+		below_output_enabled = 0;
+		digitalWrite(BELOW_TARGET_PIN, LOW);
+	}
+
 	++loop_count;
-	digitalWrite(LED_PIN, ((loop_count % 2) == 0) ? LOW : HIGH);
-	digitalWrite(ERROR_PIN, LOW);
+	digitalWrite(LOOP_STATUS_PIN, ((loop_count % 2) == 0) ? LOW : HIGH);
 
 	simple_stats_init(&ss_temperature);
 	simple_stats_init(&ss_internal_temp);
 
 	errors = 0;
 	for (i = 0; micros() < target_micros; ++i) {
-		raw = spi_read_big_endian_uint32(CHIP_SELECT_PIN);
+		raw = spi_read_big_endian_uint32(THERMO_COUPLE_CHIP_SELECT_PIN);
 		max31855_from_u32(&smax, raw);
 		if (smax.fault) {
 			++errors;
@@ -340,29 +393,74 @@ void loop()
 			d = max31855_internal(&smax);
 			simple_stats_append_val(&ss_internal_temp, d);
 		}
-		digitalWrite(ERROR_PIN, smax.fault ? HIGH : LOW);
+		digitalWrite(ERROR_STATUS_PIN, smax.fault ? HIGH : LOW);
 		delayMicroseconds(microseconds_between_samples);
 	}
 	target_micros += microseconds_per_reading;
 
+	target = digitalRead(USE_WARMER_TARGET_READ_PIN) ? TARGET_2 : TARGET_1;
+
 	Serial.print(loop_count);
 	Serial.print(", ");
 	if (ss_temperature.cnt) {
-		Serial.print(simple_stats_average(&ss_temperature));
+		avg_temp = simple_stats_average(&ss_temperature);
+		below = (avg_temp < target) ? 1 : 0;
+		way_over =
+		    (avg_temp > (target + OVER_TARGET_THRESHOLD)) ? 1 : 0;
+
+		digitalWrite(BELOW_TARGET_STATUS_PIN, below ? HIGH : LOW);
+		digitalWrite(OVER_TARGET_STATUS_PIN, way_over ? HIGH : LOW);
+
+		if (way_over) {
+			digitalWrite(BELOW_TARGET_PIN, LOW);
+			below_output_enabled = 0;
+		}
+
+		if (enabled) {
+			enabled = digitalRead(ENABLE_BELOW_TARGET_READ_PIN);
+		}
+		if (!enabled) {
+			digitalWrite(BELOW_TARGET_PIN, LOW);
+			below_output_enabled = 0;
+		}
+
+		if (enabled && target_change_micros < micros()) {
+			digitalWrite(BELOW_TARGET_PIN, below ? HIGH : LOW);
+			below_output_enabled = below ? 1 : 0;
+			target_change_micros += microseconds_between_changes;
+		}
+
+		Serial.print(avg_temp);
 		Serial.print(" +/-");
 		Serial.print(simple_stats_std_dev
 			     (&ss_temperature, bessel_correct));
+		Serial.print(", target: ");
+		Serial.print(target);
+
+		Serial.print(" (below: ");
+		Serial.print(below ? "yes" : "no");
+		Serial.print(", ");
+		Serial.print(below_output_enabled ? "ON" : "OFF");
+		Serial.print(")");
+
 		Serial.print(" (min: ");
 		Serial.print(ss_temperature.min);
 		Serial.print(", max: ");
 		Serial.print(ss_temperature.max);
 		Serial.print(", cnt: ");
 		Serial.print(ss_temperature.cnt);
-		Serial.print("), internal: ");
-		Serial.print(simple_stats_average(&ss_internal_temp));
-		Serial.print(" +/-");
-		Serial.print(simple_stats_std_dev
-			     (&ss_internal_temp, bessel_correct));
+		Serial.print(", err: ");
+		Serial.print(errors);
+		Serial.print(")");
+
+		if (PRINT_INTERNAL_TEMP) {
+			Serial.print(", internal: ");
+			Serial.print(simple_stats_average(&ss_internal_temp));
+			Serial.print(" +/-");
+			Serial.print(simple_stats_std_dev
+				     (&ss_internal_temp, bessel_correct));
+		}
+
 		Serial.println();
 	}
 
@@ -373,13 +471,17 @@ void loop()
 		debug_max31855(saved_error_raw);
 		Serial.println();
 
-		digitalWrite(ERROR_PIN, HIGH);
+		digitalWrite(ERROR_STATUS_PIN, HIGH);
 		if (ss_temperature.cnt > errors) {
 			/* got some values, but some errors, add small delay */
-			delayMicroseconds(microseconds_per_reading / 4);
+			/* but do not change the target sample interval */
+			delayMicroseconds(microseconds_per_reading / 8);
 		} else {
 			/* things are broken add large delay */
 			delayMicroseconds(microseconds_per_reading * 4);
+			/* and postpone the next sample evaluation */
+			target_micros += (microseconds_per_reading * 4);
 		}
+		digitalWrite(ERROR_STATUS_PIN, LOW);
 	}
 }
