@@ -23,17 +23,15 @@
 #include <float.h>
 #include <math.h>
 
-/*
-#define TARGET_1 70.0
-#define TARGET_1 64.7
-*/
-#define TARGET_1 20.0
+#define TARGET_1 27.0
+/* #define TARGET_1 64.7 */
+/* #define TARGET_1 70.0 */
+/* #define TARGET_1 95.0 */
 
-/*
-#define TARGET_2 80.0
-#define TARGET_2 78.37
-*/
-#define TARGET_2 25.0
+#define TARGET_2 34.0
+/* #define TARGET_2 78.37 */
+/* #define TARGET_2 80.0 */
+/* #define TARGET_2 99.0 */
 
 #define SECONDS_PER_READING 1
 #define MINIMUM_SECONDS_BETWEEN_CHANGE 5
@@ -363,7 +361,7 @@ void loop()
 	struct max31855_s smax;
 	simple_stats ss_temperature, ss_internal_temp;
 	int bessel_correct = 1;
-	unsigned int enabled, below, way_over, errors;
+	unsigned int enabled, below, way_over, errors, target_num;
 	double target, avg_temp;
 	size_t i;
 
@@ -398,7 +396,9 @@ void loop()
 	}
 	target_micros += microseconds_per_reading;
 
-	target = digitalRead(USE_WARMER_TARGET_READ_PIN) ? TARGET_2 : TARGET_1;
+
+	target_num = digitalRead(USE_WARMER_TARGET_READ_PIN) ? 2 : 1;
+	target = target_num == 2 ? TARGET_2 : TARGET_1;
 
 	Serial.print(loop_count);
 	Serial.print(", ");
@@ -434,7 +434,9 @@ void loop()
 		Serial.print(" +/-");
 		Serial.print(simple_stats_std_dev
 			     (&ss_temperature, bessel_correct));
-		Serial.print(", target: ");
+		Serial.print(", target ");
+		Serial.print(target_num);
+		Serial.print(": ");
 		Serial.print(target);
 
 		Serial.print(" (below: ");
