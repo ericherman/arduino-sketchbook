@@ -23,8 +23,6 @@ const uint32_t max_milliseconds_on = 50 * milliseconds_per_second;
 /* If we're reading below too_cold_temp_c, equal time off and on */
 const uint32_t cold_max_milliseconds_on = max_milliseconds_off;
 
-const unsigned long milliseconds_per_reading =
-    (seconds_per_reading * milliseconds_per_second);
 const unsigned long microseconds_between_samples = 500;
 
 /* INPUT PINS */
@@ -43,6 +41,8 @@ const uint8_t thermo_couple_chip_select_pin = 2;
 uint32_t loop_count = 0;
 unsigned long target_millis = 0;
 int heater_status = LOW;
+int too_cold = 0;
+int too_warm = 0;
 
 /* POSIX and Windows define CHAR_BIT to be 8, but embedded platforms vary */
 #ifndef CHAR_BIT
@@ -101,8 +101,14 @@ void setup(void)
 
 	const int tty_baud = 9600;
 	Serial.begin(tty_baud);
+
 	Serial.println();
-	Serial.println("Start");
+	Serial.print(__FILE__);
+	Serial.print(':');
+	Serial.print(__LINE__);
+	Serial.print(' ');
+	Serial.print(__func__);
+	Serial.println("()");
 	Serial.println();
 
 	Serial.println("=================================================");
@@ -114,12 +120,52 @@ void setup(void)
 	Serial.println("=================================================");
 	Serial.println();
 
-	Serial.print("Seconds per Reading: ");
-	Serial.println((double)milliseconds_per_reading /
-		       (double)milliseconds_per_second);
-	Serial.print("microseconds delay between samples: ");
+	Serial.println("Assumes max31855 thermo couple attached to SPI");
+	Serial.print("\tthermo_couple_chip_select_pin: ");
+	Serial.println(thermo_couple_chip_select_pin);
+	Serial.println();
+	Serial.print("\theater control pin:            ");
+	Serial.println(heater_pin);
+	Serial.println();
+	Serial.print("\tactivity pin:                  ");
+	Serial.println(blink_pin);
+	Serial.println();
+	Serial.print("\ttoo cold indicator pin:        ");
+	Serial.println(too_cold_pin);
+	Serial.println();
+	Serial.print("\ttoo warm indicator pin:        ");
+	Serial.println(too_warm_pin);
+	Serial.println();
+	Serial.print("\terror indicator pin:           ");
+	Serial.println(error_pin);
+	Serial.println();
+	Serial.println();
+	Serial.print("Will toggle the heater control pin ON  for ");
+	Serial.print(cold_max_milliseconds_on / milliseconds_per_second);
+	Serial.print(" seconds until ");
+	Serial.print(too_cold_temp_c);
+	Serial.println(" degrees.");
+	Serial.print("Will toggle the heater control pin ON  for ");
+	Serial.print(max_milliseconds_on / milliseconds_per_second);
+	Serial.print(" seconds until ");
+	Serial.print(too_warm_temp_c);
+	Serial.println(" degrees.");
+	Serial.print("Will toggle the heater control pin OFF for ");
+	Serial.print(max_milliseconds_off / milliseconds_per_second);
+	Serial.println(" between heating cycles.");
+	Serial.println();
+	Serial.println();
+	Serial.print("Will display a reading ");
+	Serial.print(seconds_per_reading);
+	Serial.println(" seconds");
+	Serial.print("\tmicroseconds delay between samples: ");
 	Serial.println(microseconds_between_samples);
-	Serial.println("\n");
+	Serial.println();
+	Serial.println();
+
+	Serial.println("Start");
+	Serial.println();
+	Serial.println();
 
 	target_millis = millis();
 }
@@ -139,6 +185,8 @@ void loop(void)
 	uint32_t saved_error_raw = 0;
 
 	unsigned int errors = 0;
+	const unsigned long milliseconds_per_reading =
+	    (seconds_per_reading * milliseconds_per_second);
 	for (size_t i = 0; millis() < (mnow + milliseconds_per_reading); ++i) {
 		uint32_t raw = 0;
 		raw = spi_read_big_endian_uint32(thermo_couple_chip_select_pin);
@@ -160,8 +208,6 @@ void loop(void)
 	Serial.print(" until ");
 	Serial.print(1 + (target_millis / milliseconds_per_second));
 	Serial.print(", ");
-	int too_cold = 0;
-	int too_warm = 0;
 	if (ss_temperature.cnt) {
 		double avg_temp = simple_stats_average(&ss_temperature);
 
