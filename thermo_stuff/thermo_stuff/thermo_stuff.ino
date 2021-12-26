@@ -1,6 +1,6 @@
 /* thermo_stuff.ino : Arduino code for the MAX31855K Thermocouple */
 /* Copyright (C) 2014, 2016, 2018, 2021 Eric Herman <eric@freesa.org> */
-/* License: GPLv3 or later */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* includes: https://github.com/ericherman/simple_stats */
 
 #include <Arduino.h>
@@ -10,36 +10,34 @@
 #include "simple_stats.h"
 #include "max31855.h"
 
-#define Seconds_per_reading 1
-#define Way_over_temp_c	90
-#define Too_cold_temp_c	60
+const uint32_t seconds_per_reading = 1;
+const uint32_t too_warm_temp_c = 90;
+const uint32_t too_cold_temp_c = 60;
 
-#define Microseconds_per_second (1000UL * 1000UL)
-#define Milliseconds_per_second (1000UL)
+/* const uint32_t microseconds_per_second = 1000 * 1000; */
+const uint32_t milliseconds_per_second = 1000;
 
-const uint32_t max_milliseconds_off = 2 * 60 * Milliseconds_per_second;
-const uint32_t max_milliseconds_on = 50 * Milliseconds_per_second;
+const uint32_t max_milliseconds_off = 2 * 60 * milliseconds_per_second;
+const uint32_t max_milliseconds_on = 50 * milliseconds_per_second;
 
-/* If we're reading below Too_cold_temp_c, equal time off and on */
+/* If we're reading below too_cold_temp_c, equal time off and on */
 const uint32_t cold_max_milliseconds_on = max_milliseconds_off;
 
 const unsigned long milliseconds_per_reading =
-    (Seconds_per_reading * Milliseconds_per_second);
+    (seconds_per_reading * milliseconds_per_second);
 const unsigned long microseconds_between_samples = 500;
-
-#define TTY_BAUD 9600
-
-/* INTERNAL PINS */
-#define Thermo_couple_chip_select_pin 2
 
 /* INPUT PINS */
 
 /* OUTPUT PINS */
-#define HEATER_PIN 5
-#define BLINK_PIN 6
-#define TOO_COLD_STATUS_PIN 7
-#define WAY_OVER_STATUS_PIN 8
-#define ERROR_STATUS_PIN 9
+const uint8_t heater_pin = 5;
+const uint8_t blink_pin = 6;
+const uint8_t too_cold_pin = 7;
+const uint8_t too_warm_pin = 8;
+const uint8_t error_pin = 9;
+
+/* INTERNAL PINS */
+const uint8_t thermo_couple_chip_select_pin = 2;
 
 /* globals */
 uint32_t loop_count = 0;
@@ -81,27 +79,28 @@ uint32_t spi_read_big_endian_uint32(uint8_t cs)
 
 void setup(void)
 {
-	pinMode(Thermo_couple_chip_select_pin, OUTPUT);
+	pinMode(thermo_couple_chip_select_pin, OUTPUT);
 
-	pinMode(HEATER_PIN, OUTPUT);
-	pinMode(BLINK_PIN, OUTPUT);
-	pinMode(TOO_COLD_STATUS_PIN, OUTPUT);
-	pinMode(WAY_OVER_STATUS_PIN, OUTPUT);
-	pinMode(ERROR_STATUS_PIN, OUTPUT);
+	pinMode(heater_pin, OUTPUT);
+	pinMode(blink_pin, OUTPUT);
+	pinMode(too_cold_pin, OUTPUT);
+	pinMode(too_warm_pin, OUTPUT);
+	pinMode(error_pin, OUTPUT);
 
-	digitalWrite(Thermo_couple_chip_select_pin, HIGH);
-	digitalWrite(HEATER_PIN, heater_status);
-	digitalWrite(BLINK_PIN, LOW);
-	digitalWrite(TOO_COLD_STATUS_PIN, LOW);
-	digitalWrite(WAY_OVER_STATUS_PIN, LOW);
-	digitalWrite(ERROR_STATUS_PIN, LOW);
+	digitalWrite(thermo_couple_chip_select_pin, HIGH);
+	digitalWrite(heater_pin, heater_status);
+	digitalWrite(blink_pin, LOW);
+	digitalWrite(too_cold_pin, LOW);
+	digitalWrite(too_warm_pin, LOW);
+	digitalWrite(error_pin, LOW);
 
 	SPI.begin();
 
 	/* Let IC stabilize to avoid first reading as garbage */
 	delay(50);
 
-	Serial.begin(TTY_BAUD);
+	const int tty_baud = 9600;
+	Serial.begin(tty_baud);
 	Serial.println();
 	Serial.println("Start");
 	Serial.println();
@@ -117,7 +116,7 @@ void setup(void)
 
 	Serial.print("Seconds per Reading: ");
 	Serial.println((double)milliseconds_per_reading /
-		       (double)Milliseconds_per_second);
+		       (double)milliseconds_per_second);
 	Serial.print("microseconds delay between samples: ");
 	Serial.println(microseconds_between_samples);
 	Serial.println("\n");
@@ -129,10 +128,10 @@ void loop(void)
 {
 	unsigned long mnow = millis();
 
-	digitalWrite(ERROR_STATUS_PIN, LOW);
+	digitalWrite(error_pin, LOW);
 
 	++loop_count;
-	digitalWrite(BLINK_PIN, ((loop_count % 2) == 0) ? LOW : HIGH);
+	digitalWrite(blink_pin, ((loop_count % 2) == 0) ? LOW : HIGH);
 
 	simple_stats ss_temperature;
 	simple_stats_init(&ss_temperature);
@@ -142,7 +141,7 @@ void loop(void)
 	unsigned int errors = 0;
 	for (size_t i = 0; millis() < (mnow + milliseconds_per_reading); ++i) {
 		uint32_t raw = 0;
-		raw = spi_read_big_endian_uint32(Thermo_couple_chip_select_pin);
+		raw = spi_read_big_endian_uint32(thermo_couple_chip_select_pin);
 		struct max31855 smax;
 		if (max31855_from_u32(&smax, raw)) {
 			++errors;
@@ -151,19 +150,18 @@ void loop(void)
 			double d = max31855_degrees_c(&smax);
 			simple_stats_append_val(&ss_temperature, d);
 		}
-		digitalWrite(ERROR_STATUS_PIN,
-			     max31855_error(&smax) ? HIGH : LOW);
+		digitalWrite(error_pin, max31855_error(&smax) ? HIGH : LOW);
 		delayMicroseconds(microseconds_between_samples);
 	}
 
-	Serial.print(mnow / Milliseconds_per_second);
+	Serial.print(mnow / milliseconds_per_second);
 	Serial.print(", heater status: ");
 	Serial.print(heater_status == HIGH ? "ON " : "off");
 	Serial.print(" until ");
-	Serial.print(1 + (target_millis / Milliseconds_per_second));
+	Serial.print(1 + (target_millis / milliseconds_per_second));
 	Serial.print(", ");
 	int too_cold = 0;
-	int way_over = 0;
+	int too_warm = 0;
 	if (ss_temperature.cnt) {
 		double avg_temp = simple_stats_average(&ss_temperature);
 
@@ -184,13 +182,13 @@ void loop(void)
 		Serial.print(errors);
 		Serial.print(")");
 
-		too_cold = (avg_temp < Too_cold_temp_c) ? 1 : 0;
-		digitalWrite(TOO_COLD_STATUS_PIN, too_cold ? HIGH : LOW);
+		too_cold = (avg_temp < too_cold_temp_c) ? 1 : 0;
+		digitalWrite(too_cold_pin, too_cold ? HIGH : LOW);
 
-		way_over = (avg_temp > Way_over_temp_c) ? 1 : 0;
-		digitalWrite(WAY_OVER_STATUS_PIN, way_over ? HIGH : LOW);
+		too_warm = (avg_temp > too_warm_temp_c) ? 1 : 0;
+		digitalWrite(too_warm_pin, too_warm ? HIGH : LOW);
 
-		if (way_over) {
+		if (too_warm) {
 			Serial.print(" TOO HOT!");
 		}
 
@@ -198,7 +196,7 @@ void loop(void)
 	}
 
 	if (errors) {
-		digitalWrite(ERROR_STATUS_PIN, HIGH);
+		digitalWrite(error_pin, HIGH);
 
 		Serial.print("Errors: ");
 		Serial.print(errors);
@@ -224,17 +222,17 @@ void loop(void)
 		}
 		Serial.println("waking.");
 
-		digitalWrite(ERROR_STATUS_PIN, LOW);
+		digitalWrite(error_pin, LOW);
 	}
 
 	if (mnow > target_millis) {
-		if (way_over || heater_status == HIGH) {
+		if (too_warm || heater_status == HIGH) {
 			heater_status = LOW;
-			digitalWrite(HEATER_PIN, heater_status);
+			digitalWrite(heater_pin, heater_status);
 			target_millis += max_milliseconds_off;
 		} else {
 			heater_status = HIGH;
-			digitalWrite(HEATER_PIN, HIGH);
+			digitalWrite(heater_pin, HIGH);
 			if (too_cold) {
 				target_millis += cold_max_milliseconds_on;
 			} else {
