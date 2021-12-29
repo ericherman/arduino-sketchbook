@@ -146,14 +146,10 @@ void max31855_log(void *log, struct max31855 *smax)
 
 	log_s(log, "\tquarter_degrees: ");
 	log_i(log, smax->quarter_degrees);
-	log_s(log, " (");
-	log_f(log, max31855_degrees_c(smax));
-	log_s(log, ")");
 	log_eol(log);
 
-	log_s(log, "\treserved (");
+	log_s(log, "\treserved17: ");
 	log_u(log, smax->reserved17);
-	log_s(log, ")");
 	log_eol(log);
 
 	log_s(log, "\tfault: ");
@@ -162,35 +158,43 @@ void max31855_log(void *log, struct max31855 *smax)
 
 	log_s(log, "\tinternal_sixteenths: ");
 	log_i(log, smax->internal_sixteenths);
-	log_s(log, " (");
-	log_f(log, max31855_internal_degrees_c(smax));
-	log_s(log, ")");
 	log_eol(log);
 
-	log_s(log, "\treserved (");
+	log_s(log, "\treserved3: ");
 	log_u(log, smax->reserved3);
-	log_s(log, ")");
 	log_eol(log);
 
-	log_s(log, "\terr_scv: ");
+	log_s(log, "\terr_scv: \"");
 	log_u(log, smax->err_scv);
 	if (smax->err_scv) {
 		log_s(log, " Shorted to Vcc!");
 	}
+	log_s(log, "\"");
 	log_eol(log);
 
-	log_s(log, "\trr_scg: ");
+	log_s(log, "\trr_scg: \"");
 	log_u(log, smax->err_scg);
 	if (smax->err_scg) {
 		log_s(log, " Shorted to GND!");
 	}
+	log_s(log, "\"");
 	log_eol(log);
 
-	log_s(log, "\terr_oc: ");
+	log_s(log, "\terr_oc: \"");
 	log_u(log, smax->err_oc);
 	if (smax->err_oc) {
 		log_s(log, " Open Circuit!");
 	}
+	log_s(log, "\"");
+	log_eol(log);
+
+	log_s(log, "\t_degrees: ");
+	log_i(log, smax->quarter_degrees);
+	log_f(log, max31855_degrees_c(smax));
+	log_eol(log);
+
+	log_s(log, "\t_internal degrees: ");
+	log_f(log, max31855_internal_degrees_c(smax));
 	log_eol(log);
 
 	log_s(log, "}");

@@ -8,6 +8,7 @@
 #include <limits.h>
 
 #include "simple_stats.h"
+
 #include "max31855.h"
 
 const uint32_t seconds_per_reading = 1;
@@ -56,9 +57,14 @@ uint32_t spi_read_big_endian_uint32(uint8_t cs)
 	uint8_t bytes[4];
 	uint32_t u32;
 
+	const uint32_t spi_clock = 4000000;
+	const uint8_t spi_bit_order = MSBFIRST;
+	const uint8_t spi_data_mode = SPI_MODE0;
+
 	digitalWrite(cs, LOW);
 
-	SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+	SPISettings spis = SPISettings(spi_clock, spi_bit_order, spi_data_mode);
+	SPI.beginTransaction(spis);
 
 	bytes[3] = SPI.transfer(0x00);
 	bytes[2] = SPI.transfer(0x00);
@@ -123,19 +129,14 @@ void setup(void)
 	Serial.println("Assumes max31855 thermo couple attached to SPI");
 	Serial.print("\tthermo_couple_chip_select_pin: ");
 	Serial.println(thermo_couple_chip_select_pin);
-	Serial.println();
 	Serial.print("\theater control pin:            ");
 	Serial.println(heater_pin);
-	Serial.println();
 	Serial.print("\tactivity pin:                  ");
 	Serial.println(blink_pin);
-	Serial.println();
 	Serial.print("\ttoo cold indicator pin:        ");
 	Serial.println(too_cold_pin);
-	Serial.println();
 	Serial.print("\ttoo warm indicator pin:        ");
 	Serial.println(too_warm_pin);
-	Serial.println();
 	Serial.print("\terror indicator pin:           ");
 	Serial.println(error_pin);
 	Serial.println();
@@ -168,6 +169,22 @@ void setup(void)
 	Serial.println();
 
 	target_millis = millis();
+}
+
+/* buf must hold a 36 character string (including NULL terminator */
+char *u32tob(char *buf, uint32_t val)
+{
+	size_t str_pos = 0;
+	for (size_t i = 32; i > 0; --i) {
+		size_t shift = (i - 1);
+		if (i == 24 || i == 16 || i == 8) {
+			buf[str_pos++] = ' ';
+		}
+		buf[str_pos++] = ((val >> shift) & 1) ? '1' : '0';
+	}
+	buf[str_pos] = '\0';
+
+	return buf;
 }
 
 void loop(void)
@@ -245,10 +262,12 @@ void loop(void)
 		digitalWrite(error_pin, HIGH);
 
 		Serial.print("Errors: ");
-		Serial.print(errors);
+		Serial.println(errors);
+		Serial.print(" last error raw value: 0x");
+		Serial.println(saved_error_raw, HEX);
+		char buf[36];
 		Serial.print(" last error raw value: ");
-		Serial.print(saved_error_raw);
-		Serial.print(" == ");
+		Serial.println(u32tob(buf, saved_error_raw));
 		struct max31855 error_max;
 		max31855_from_u32(&error_max, saved_error_raw);
 		max31855_log(NULL, &error_max);
