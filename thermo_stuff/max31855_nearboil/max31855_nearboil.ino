@@ -1,4 +1,4 @@
-/* thermo_stuff.ino : Arduino code for the MAX31855K Thermocouple */
+/* max31855_nearboil.ino : Arduino code for the MAX31855K Thermocouple */
 /* Copyright (C) 2014, 2016, 2018, 2021 Eric Herman <eric@freesa.org> */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* includes: https://github.com/ericherman/simple_stats */
